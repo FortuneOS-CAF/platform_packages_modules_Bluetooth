@@ -715,6 +715,12 @@ class LeAudioClientImpl : public LeAudioClient {
           kLogAfSuspendForReconfig + "LocalSource",
           "r_state: " + ToString(audio_receiver_state_) +
               "s_state: " + ToString(audio_sender_state_));
+      if (audio_receiver_state_ == AudioState::IDLE &&
+          (configuration_context_type_ == LeAudioContextType::CONVERSATIONAL ||
+          configuration_context_type_ == LeAudioContextType::GAME)) {
+        log::info("Suspended for both directions if switch to voice or game context");
+        le_audio_sink_hal_client_->SuspendedForReconfiguration();
+      }
       le_audio_source_hal_client_->SuspendedForReconfiguration();
     }
     if (audio_receiver_state_ > AudioState::IDLE) {
@@ -6048,8 +6054,18 @@ class LeAudioClientImpl : public LeAudioClient {
         LeAudioDevice* leAudioDevice = leAudioDevices_.FindByCisConnHdl(
             event->cig_id, event->cis_conn_hdl);
         if (!leAudioDevice) {
-          log::error("no bonded Le Audio Device with CIS: {}",
-                     event->cis_conn_hdl);
+          log::error("no bonded Le Audio Device with CIS: {}, CIG: {}",
+                     event->cis_conn_hdl,event->cig_id);
+          LeAudioDeviceGroup* group = aseGroups_.FindById(event->cig_id);
+          if (group) {
+            if (!group->HaveAllCisesDisconnected()) {
+              log::error("not all cis is disconnected");
+            } else {
+              groupStateMachine_->RemoveCigForGroup(group);
+            }
+          } else {
+            log::error("Invalid cig_id {}", event->cig_id);
+          }
           break;
         }
         LeAudioDeviceGroup* group =
@@ -6128,19 +6144,35 @@ class LeAudioClientImpl : public LeAudioClient {
     log::warn("{} delay {} mode.", delay, mode);
     if (mode != 0xFF) {
       group->stream_conf.stream_params.sink.mode = mode;
-    }
-    if (delay != 0xFFFF) {
-      log::warn("updating delay to bt audio hal");
-      group->UpdateCisConfiguration(bluetooth::le_audio::types::kLeAudioDirectionSink);
-      BidirectionalPair<uint16_t> delays_pair = {
-        .sink = delay,
-        .source = 0};
-      CodecManager::GetInstance()->UpdateActiveAudioConfig(
-        group->stream_conf.stream_params, delays_pair, group->stream_conf.codec_id,
-        std::bind(&LeAudioClientImpl::UpdateAudioConfigToHal,
+      if (group->IsStreaming()) {
+        log::warn("updating mode to bt audio hal");
+        group->UpdateCisConfiguration(bluetooth::le_audio::types::kLeAudioDirectionSink);
+        BidirectionalPair<uint16_t> delays_pair = {
+          .sink = group->stream_conf.stream_params.sink.delay,
+          .source = 0};
+        CodecManager::GetInstance()->UpdateActiveAudioConfig(
+          group->stream_conf.stream_params, delays_pair, group->stream_conf.codec_id,
+          std::bind(&LeAudioClientImpl::UpdateAudioConfigToHal,
                   weak_factory_.GetWeakPtr(), std::placeholders::_1,
                   std::placeholders::_2));
-      ConfirmLocalAudioSourceStreamingRequest(true);
+        ConfirmLocalAudioSourceStreamingRequest(true);
+      }
+    }
+    if (delay != 0xFFFF) {
+      group->stream_conf.stream_params.sink.delay = delay;
+      if (group->IsStreaming()) {
+        log::warn("updating delay to bt audio hal");
+        group->UpdateCisConfiguration(bluetooth::le_audio::types::kLeAudioDirectionSink);
+        BidirectionalPair<uint16_t> delays_pair = {
+          .sink = delay,
+          .source = 0};
+        CodecManager::GetInstance()->UpdateActiveAudioConfig(
+          group->stream_conf.stream_params, delays_pair, group->stream_conf.codec_id,
+          std::bind(&LeAudioClientImpl::UpdateAudioConfigToHal,
+                  weak_factory_.GetWeakPtr(), std::placeholders::_1,
+                  std::placeholders::_2));
+        ConfirmLocalAudioSourceStreamingRequest(true);
+      }
     }
   }
 
@@ -6289,6 +6321,14 @@ class LeAudioClientImpl : public LeAudioClient {
     auto group = aseGroups_.FindById(active_group_id_);
 
     if (audio_sender_state_ >= AudioState::READY_TO_START) {
+      if (audio_receiver_state_ < AudioState::READY_TO_START &&
+          (configuration_context_type_ == LeAudioContextType::CONVERSATIONAL ||
+          configuration_context_type_ == LeAudioContextType::GAME)) {
+        log::info("Reconfiguration complete for both directions if switch to "
+                "voice or game context");
+        previously_active_directions |=
+            bluetooth::le_audio::types::kLeAudioDirectionSource;
+      }
       previously_active_directions |=
           bluetooth::le_audio::types::kLeAudioDirectionSink;
     }
@@ -6528,7 +6568,7 @@ class LeAudioClientImpl : public LeAudioClient {
             stream_setup_start_timestamp_ = 0;
             if (group->IsSuspendedForReconfiguration()) {
               reconfigurationComplete();
-            } else {
+            } else if (status != GroupStreamStatus::IDLE) {
                CancelStreamingRequest();
             }
           }
