@@ -696,14 +696,6 @@ void btif_hh_remove_device(const tAclLinkSpec& link_spec) {
   /* Remove all connections instances related to link_spec. If AUTO transport is
    * used, btif_hh_find_dev_by_link_spec() finds both HID and HOGP instances */
   while ((p_dev = btif_hh_find_dev_by_link_spec(link_spec)) != NULL) {
-    /* need to notify up-layer device is disconnected to avoid state out of sync
-     * with up-layer */
-
-    do_in_jni_thread(base::Bind(
-        [](tAclLinkSpec link_spec) {
-          BTHH_STATE_UPDATE(link_spec, BTHH_CONN_STATE_DISCONNECTED);
-        },
-        link_spec));
 
     if (btif_hh_cb.device_num > 0) {
       btif_hh_cb.device_num--;
@@ -714,6 +706,14 @@ void btif_hh_remove_device(const tAclLinkSpec& link_spec) {
     p_dev->dev_status = BTHH_CONN_STATE_UNKNOWN;
     p_dev->dev_handle = BTA_HH_INVALID_HANDLE;
     p_dev->uhid.ready_for_data = false;
+    /* need to notify up-layer device is disconnected to avoid state out of sync
+     * with up-layer */
+
+    do_in_jni_thread(base::Bind(
+        [](tAclLinkSpec link_spec) {
+          BTHH_STATE_UPDATE(link_spec, BTHH_CONN_STATE_DISCONNECTED);
+        },
+         p_dev->link_spec));
   }
 }
 
@@ -1085,8 +1085,9 @@ static void btif_hh_upstreams_evt(uint16_t event, char* p_param) {
       p_dev = btif_hh_find_connected_dev_by_handle(p_data->hs_data.handle);
       if (p_dev) {
         BT_HDR* hdr = p_data->hs_data.rsp_data.p_rpt_data;
+        tBTA_HH_STATUS status = p_data->hs_data.status;
 
-        if (hdr) { /* Get report response */
+        if (status == BTA_HH_OK && hdr) { /* Get report response */
           uint8_t* data = (uint8_t*)(hdr + 1) + hdr->offset;
           uint16_t len = hdr->len;
           HAL_CBACK(bt_hh_callbacks, get_report_cb,

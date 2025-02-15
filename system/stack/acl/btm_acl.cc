@@ -59,6 +59,7 @@
 #include "rust/src/core/ffi/types.h"
 #include "stack/acl/acl.h"
 #include "stack/acl/peer_packet_types.h"
+#include "stack/btm/btm_ble_sec.h"
 #include "stack/btm/btm_dev.h"
 #include "stack/btm/btm_int.h"
 #include "stack/btm/btm_int_types.h"
@@ -132,6 +133,7 @@ struct RoleChangeView {
 namespace {
 StackAclBtmAcl internal_;
 std::unique_ptr<RoleChangeView> delayed_role_change_ = nullptr;
+std::set<struct acl_client_callback_s*> acl_client_callbacks_;
 }
 
 typedef struct {
@@ -494,6 +496,9 @@ void btm_acl_removed(uint16_t handle) {
   }
   p_acl->in_use = false;
   NotifyAclLinkDown(*p_acl);
+  for (const auto& cb : acl_client_callbacks_) {
+    cb->on_acl_link_down(p_acl->remote_addr, p_acl->transport);
+  }
   if (p_acl->is_transport_br_edr()) {
     BTM_PM_OnDisconnected(handle);
   }
@@ -1076,6 +1081,16 @@ void StackAclBtmAcl::btm_establish_continue(tACL_CONN* p_acl) {
           default_packet_type_mask, p_acl->RemoteAddress());
     }
     btm_set_link_policy(p_acl, btm_cb.acl_cb_.DefaultLinkPolicy());
+  } else if (p_acl->is_transport_ble()) {
+    tBTM_SEC_DEV_REC* p_dev_rec = btm_find_dev(p_acl->remote_addr);
+
+    if (p_dev_rec == nullptr) {
+      log::warn("No security record for {}", p_acl->RemoteAddress());
+    } else if (p_dev_rec->sec_rec.is_le_link_key_known()) {
+      btm_ble_set_encryption(
+          p_acl->remote_addr, BTM_BLE_SEC_ENCRYPT,
+          p_dev_rec->role_central ? HCI_ROLE_CENTRAL : HCI_ROLE_PERIPHERAL);
+    }
   }
   NotifyAclLinkUp(*p_acl);
 }
@@ -2712,12 +2727,20 @@ void acl_process_extended_features(uint16_t handle, uint8_t current_page_number,
   }
 }
 
-void ACL_RegisterClient(struct acl_client_callback_s* /* callbacks */) {
-  log::debug("UNIMPLEMENTED");
+void ACL_RegisterClient(struct acl_client_callback_s* callbacks) {
+  if (!callbacks) {
+    log::warn("callbacks is null");
+    return;
+  }
+  acl_client_callbacks_.insert(callbacks);
 }
 
-void ACL_UnregisterClient(struct acl_client_callback_s* /* callbacks */) {
-  log::debug("UNIMPLEMENTED");
+void ACL_UnregisterClient(struct acl_client_callback_s* callbacks) {
+  if (!callbacks) {
+    log::warn("callbacks is null");
+    return;
+  }
+  acl_client_callbacks_.erase(callbacks);
 }
 
 tACL_CONN* btm_acl_for_bda(const RawAddress& bd_addr, tBT_TRANSPORT transport) {

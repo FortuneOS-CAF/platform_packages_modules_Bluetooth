@@ -1863,6 +1863,11 @@ public class LeAudioService extends ProfileService {
             return;
         }
 
+        if (mBroadcastIdDeactivatedForUnicastTransition.isPresent()) {
+            Log.w(TAG, "Not set active to VC if broadcast deactivated for unicast call");
+            return;
+        }
+
         if (mExposedActiveDevice != null) {
             volumeControlService.setGroupActive(getGroupId(mExposedActiveDevice), false);
         }
@@ -2128,9 +2133,17 @@ public class LeAudioService extends ProfileService {
                 if (deviceInfo.isSink()) {
                     mAudioManagerAddedOutDevice = null;
                     if (mBroadcastIdPendingStart.isPresent()) {
-                        Log.d(TAG, "mBroadcastIdPendingStart exist, Start pending broadcast");
-                        startBroadcast(mBroadcastIdPendingStart.get());
-                        mBroadcastIdPendingStart = Optional.empty();
+                        if (isBroadcastAllowedToBeActivateInCurrentAudioMode()) {
+                            Log.d(TAG, "mBroadcastIdPendingStart exist, Start pending broadcast");
+                            startBroadcast(mBroadcastIdPendingStart.get());
+                            mBroadcastIdPendingStart = Optional.empty();
+                        } else {
+                            Log.d(TAG, "Audio mode not allow for broadcast, transition back to unicast");
+                            transitionFromBroadcastToUnicast();
+                            mBroadcastIdDeactivatedForUnicastTransition =
+                                    Optional.of(mBroadcastIdPendingStart.get());
+                            mBroadcastIdPendingStart = Optional.empty();
+                        }
                     }
                     releaseLeAudioStream();
                 }
@@ -2244,7 +2257,9 @@ public class LeAudioService extends ProfileService {
                         + ", "
                         + mActiveAudioInDevice
                         + ", notifyAndUpdateInactiveOutDeviceOnly: "
-                        + notifyAndUpdateInactiveOutDeviceOnly);
+                        + notifyAndUpdateInactiveOutDeviceOnly
+                        + ", mBroadcastIdDeactivatedForUnicastTransition.isPresent(): "
+                        + mBroadcastIdDeactivatedForUnicastTransition.isPresent());
         if ((isActive == true) &&
             (mActiveAudioOutDevice != null || mActiveAudioInDevice != null)) {
             LeAudioGroupDescriptor descriptor = getGroupDescriptor(groupId);
@@ -2257,7 +2272,8 @@ public class LeAudioService extends ProfileService {
         if (isNewActiveOutDevice) {
             int volume = IBluetoothVolumeControl.VOLUME_CONTROL_UNKNOWN_VOLUME;
 
-            if (mActiveAudioOutDevice != null) {
+            if (mActiveAudioOutDevice != null &&
+                    !mBroadcastIdDeactivatedForUnicastTransition.isPresent()) {
                 volume = getAudioDeviceGroupVolume(groupId);
             }
 
@@ -2400,6 +2416,15 @@ public class LeAudioService extends ProfileService {
             // If broadcast is ongoing and need to update unicast fallback active group
             // we need to update the cached group id and skip changing the active device
             updateFallbackUnicastGroupIdForBroadcast(groupId);
+            if (!isBroadcastAllowedToBeActivateInCurrentAudioMode()
+                    && isBroadcastPlaying
+                    && (groupId != LE_AUDIO_GROUP_ID_INVALID)) {
+                Log.d(TAG, "Audio mode not allow for Broadcast, request unicast activation");
+                /* Request activation of unicast group */
+                handleUnicastStreamStatusChange(
+                        LeAudioStackEvent.DIRECTION_SINK,
+                        LeAudioStackEvent.STATUS_LOCAL_STREAM_REQUESTED);
+            }
             return true;
         }
 
@@ -3737,13 +3762,29 @@ public class LeAudioService extends ProfileService {
                         }
                     }
 
-                    transitionFromBroadcastToUnicast();
+                    if (leaudioUseAudioModeListener()
+                            && mBroadcastIdDeactivatedForUnicastTransition.isPresent()
+                            && isBroadcastAllowedToBeActivateInCurrentAudioMode()) {
+                        Log.w(TAG, "Audio mode change to normal, switch back to broadcast");
+                        startBroadcast(mBroadcastIdDeactivatedForUnicastTransition.get());
+                        mBroadcastIdDeactivatedForUnicastTransition = Optional.empty();
+                    } else {
+                        transitionFromBroadcastToUnicast();
+                    }
                     break;
                 case LeAudioStackEvent.BROADCAST_STATE_STOPPING:
                     Log.d(TAG, "Broadcast broadcastId: " + broadcastId + " stopping.");
                     break;
                 case LeAudioStackEvent.BROADCAST_STATE_STREAMING:
                     Log.d(TAG, "Broadcast broadcastId: " + broadcastId + " streaming.");
+                    if (!isBroadcastAllowedToBeActivateInCurrentAudioMode()) {
+                        Log.d(TAG, "Audio mode not allow for broadcast, transition from broadcast to unicast");
+                        clearBroadcastTimeoutCallback();
+                        handleUnicastStreamStatusChange(
+                                LeAudioStackEvent.DIRECTION_SINK,
+                                LeAudioStackEvent.STATUS_LOCAL_STREAM_REQUESTED);
+                        break;
+                    }
 
                     // Stream resumed
                     mHandler.post(
@@ -4790,7 +4831,8 @@ public class LeAudioService extends ProfileService {
                 if (isBroadcastReadyToBeReActivated()
                         && isAudioModeChangedFromCommunicationToNormal(
                                 previousAudioMode, mCurrentAudioMode)
-                        && (getActiveGroupId() == LE_AUDIO_GROUP_ID_INVALID)) {
+                        && (getActiveGroupId() == LE_AUDIO_GROUP_ID_INVALID)
+                        && !isPlaying(mBroadcastIdDeactivatedForUnicastTransition.get())) {
                     stopBroadcast(mBroadcastIdDeactivatedForUnicastTransition.get());
                     mBroadcastIdDeactivatedForUnicastTransition = Optional.empty();
                     break;

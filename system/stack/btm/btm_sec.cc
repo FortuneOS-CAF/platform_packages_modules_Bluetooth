@@ -3478,8 +3478,10 @@ void btm_sec_encrypt_change(uint16_t handle, tHCI_STATUS status,
         /* BR/EDR is encrypted with LK that can be used to derive LE LTK */
         p_dev_rec->sec_rec.new_encryption_key_is_p256 = false;
 
-        log::verbose("start SM over BR/EDR");
-        SMP_BR_PairWith(p_dev_rec->bd_addr);
+        if (!interop_match_addr(INTEROP_DISABLE_OUTGOING_BR_SMP, &p_dev_rec->bd_addr)) {
+          log::verbose("start SM over BR/EDR");
+          SMP_BR_PairWith(p_dev_rec->bd_addr);
+        }
       }
     }
   }
@@ -4153,8 +4155,7 @@ void btm_sec_role_changed(tHCI_STATUS hci_status, const RawAddress& bd_addr,
   }
   if (new_role == HCI_ROLE_CENTRAL && btm_dev_authenticated(p_dev_rec) &&
       !btm_dev_encrypted(p_dev_rec)) {
-    BTM_SetEncryption(p_dev_rec->bd_addr, BT_TRANSPORT_BR_EDR, NULL, NULL,
-                      BTM_BLE_SEC_NONE);
+    btm_sec_check_pending_reqs();
   }
 }
 

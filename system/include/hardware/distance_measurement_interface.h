@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #ifndef ANDROID_INCLUDE_DISTANCE_MEASUREMENT_INTERFACE_H
 #define ANDROID_INCLUDE_DISTANCE_MEASUREMENT_INTERFACE_H
 
@@ -26,17 +32,13 @@
 class DistanceMeasurementCallbacks {
  public:
   virtual ~DistanceMeasurementCallbacks() = default;
-  virtual void OnDistanceMeasurementStarted(RawAddress address,
-                                            uint8_t method) = 0;
-  virtual void OnDistanceMeasurementStartFail(RawAddress address,
-                                              uint8_t reason,
-                                              uint8_t method) = 0;
+  virtual void OnDistanceMeasurementStarted(RawAddress address, uint8_t method) = 0;
   virtual void OnDistanceMeasurementStopped(RawAddress address, uint8_t reason, uint8_t method) = 0;
   virtual void OnDistanceMeasurementResult(RawAddress address, uint32_t centimeter,
                                            uint32_t error_centimeter, int azimuth_angle,
                                            int error_azimuth_angle, int altitude_angle,
                                            int error_altitude_angle, long elapsedRealtimeNanos,
-                                           uint8_t method) = 0;
+                                           int8_t confidence_level, uint8_t method) = 0;
 };
 
 class DistanceMeasurementInterface {
@@ -48,6 +50,8 @@ class DistanceMeasurementInterface {
                                         uint16_t interval, uint8_t method) = 0;
   virtual void StopDistanceMeasurement(RawAddress raw_address,
                                        uint8_t method) = 0;
+  virtual void SetCsParams(RawAddress raw_address, int mSightType, int mLocationType,
+                   int mCsSecurityLevel, int mFrequency, int mDuration) = 0;
 };
 
 #endif /* ANDROID_INCLUDE_DISTANCE_MEASUREMENT_INTERFACE_H */

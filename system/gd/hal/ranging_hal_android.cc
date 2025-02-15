@@ -1,3 +1,4 @@
+
 /*
  * Copyright 2024 The Android Open Source Project
  *
@@ -12,6 +13,12 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ */
+
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #include <aidl/android/hardware/bluetooth/ranging/BnBluetoothChannelSounding.h>
@@ -40,6 +47,7 @@ using aidl::android::hardware::bluetooth::ranging::IBluetoothChannelSoundingSess
 using aidl::android::hardware::bluetooth::ranging::StepTonePct;
 using aidl::android::hardware::bluetooth::ranging::VendorSpecificData;
 using aidl::android::hardware::bluetooth::ranging::ModeType;
+using aidl::android::hardware::bluetooth::ranging::Reason;
 
 namespace bluetooth {
 namespace hal {
@@ -77,8 +85,10 @@ class BluetoothChannelSoundingSessionTracker : public BnBluetoothChannelSounding
   ::ndk::ScopedAStatus onResult(
       const ::aidl::android::hardware::bluetooth::ranging::RangingResult& in_result) {
     log::verbose("resultMeters {}", in_result.resultMeters);
-    hal::RangingResult ranging_result;
-    ranging_result.result_meters_ = in_result.resultMeters;
+    hal::RangingResult ranging_result = {
+            .result_meters_ = in_result.resultMeters,
+            .confidence_level_ = in_result.confidenceLevel,
+    };
     ranging_hal_callback_->OnResult(connection_handle_, ranging_result);
     return ::ndk::ScopedAStatus::ok();
   };
@@ -175,6 +185,17 @@ class RangingHalAndroid : public RangingHal {
     }
   }
 
+  void close(uint16_t connection_handle) {
+    if (session_trackers_.find(connection_handle) == session_trackers_.end()) {
+      log::error("Can't find session for connection_handle:0x{:04x}", connection_handle);
+      return;
+    } else if (session_trackers_[connection_handle]->GetSession() == nullptr) {
+      log::error("Session not opened");
+      return;
+    }
+    session_trackers_[connection_handle]->GetSession()->close(Reason::HAL_INITIATED);
+  }
+
   void HandleVendorSpecificReply(
       uint16_t connection_handle,
       const std::vector<hal::VendorSpecificCharacteristic>& vendor_specific_reply) {
@@ -217,8 +238,8 @@ class RangingHalAndroid : public RangingHal {
     log::error(" antenna_permutation_index_initiator_:{}", raw_data.antenna_permutation_index_initiator_.size());
     log::error(" antenna_permutation_index_reflector_:{}", raw_data.antenna_permutation_index_reflector_.size());
     log::error(" refl_packet_toa_tod_: {}, init_packet_toa_tod_ : {}",
-        raw_data.refl_packet_toa_tod_.size(),
-        raw_data.init_packet_toa_tod_.size());
+        raw_data.tod_toa_reflectors_.size(),
+        raw_data.toa_tod_initiators_.size());
     for (uint8_t i = 0; i < raw_data.tone_pct_initiator_[0].size(); i++) {
       StepTonePct step_tone_pct;
       for (uint8_t j = 0; j < raw_data.tone_pct_initiator_.size(); j++) {
@@ -271,22 +292,22 @@ class RangingHalAndroid : public RangingHal {
     for (auto measuredFreqOffset:raw_data.measured_freq_offset_) {
       measuredFreqOffset_.push_back(measuredFreqOffset);
     }
-    for (auto packetQuality:raw_data.init_packet_quality_) {
+    for (auto packetQuality:raw_data.packet_quality_initiator_) {
       initpacketQuality_.push_back(packetQuality);
     }
     for (auto packetRssiDbm:raw_data.init_packet_rssi_) {
       initpacketRssiDbm_.push_back(packetRssiDbm);
     }
-    for (auto packetQuality:raw_data.refl_packet_quality_) {
+    for (auto packetQuality:raw_data.packet_quality_reflector_) {
       reflpacketQuality_.push_back(packetQuality);
     }
     for (auto packetRssiDbm:raw_data.refl_packet_rssi_) {
       reflpacketRssiDbm_.push_back(packetRssiDbm);
     }
-    for (auto todToaReflector:raw_data.refl_packet_toa_tod_) {
+    for (auto todToaReflector:raw_data.tod_toa_reflectors_) {
       todToaReflector_.push_back(todToaReflector);
     }
-    for (auto toaTodInitiator:raw_data.init_packet_toa_tod_) {
+    for (auto toaTodInitiator:raw_data.toa_tod_initiators_) {
       toaTodInitiator_.push_back(toaTodInitiator);
     }
 

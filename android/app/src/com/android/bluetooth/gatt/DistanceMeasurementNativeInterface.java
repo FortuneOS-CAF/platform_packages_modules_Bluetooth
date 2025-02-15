@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 package com.android.bluetooth.gatt;
 
 import android.bluetooth.BluetoothStatusCodes;
@@ -80,6 +86,10 @@ public class DistanceMeasurementNativeInterface {
         cleanupNative();
     }
 
+    void setCsParams(String address, int mSightType, int mLocationType,
+		     int mCsSecurityLevel, int mFrequency, int mDuration) {
+        setCsParamsNative(address, mSightType, mLocationType, mCsSecurityLevel, mFrequency, mDuration);
+    }
     void startDistanceMeasurement(String address, int interval, int method) {
         startDistanceMeasurementNative(address, interval, method);
     }
@@ -90,11 +100,6 @@ public class DistanceMeasurementNativeInterface {
 
     void onDistanceMeasurementStarted(String address, int method) {
         mDistanceMeasurementManager.onDistanceMeasurementStarted(address, method);
-    }
-
-    void onDistanceMeasurementStartFail(String address, int reason, int method) {
-        mDistanceMeasurementManager.onDistanceMeasurementStartFail(
-                address, convertErrorCode(reason), method);
     }
 
     void onDistanceMeasurementStopped(String address, int reason, int method) {
@@ -111,6 +116,7 @@ public class DistanceMeasurementNativeInterface {
             int altitudeAngle,
             int errorAltitudeAngle,
             long elapsedRealtimeNanos,
+            int confidenceLevel,
             int method) {
         mDistanceMeasurementManager.onDistanceMeasurementResult(
                 address,
@@ -121,6 +127,7 @@ public class DistanceMeasurementNativeInterface {
                 altitudeAngle,
                 errorAltitudeAngle,
                 elapsedRealtimeNanos,
+                confidenceLevel,
                 method);
     }
 
@@ -155,6 +162,8 @@ public class DistanceMeasurementNativeInterface {
 
     private native void cleanupNative();
 
+    private native void setCsParamsNative(String address, int mSightType, int mLocationType,
+		                     int mCsSecurityLevel, int mFrequency, int mDuration);
     private native void startDistanceMeasurementNative(String address, int interval, int method);
 
     private native void stopDistanceMeasurementNative(String address, int method);
